@@ -1,12 +1,35 @@
+import os
+import psycopg2
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# In-memory store (temporary; will switch to PostgreSQL next)
-expenses = []
+DATABASE_URL = os.getenv("DATABASE_URL")
 
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
+
+# --- INIT TABLE ---
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            id SERIAL PRIMARY KEY,
+            title TEXT,
+            category TEXT,
+            amount FLOAT
+        );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+init_db()
+
+# --- ROUTES ---
 @app.route("/")
 def home():
     return "OK"
@@ -14,42 +37,53 @@ def home():
 @app.route("/add-expense", methods=["POST"])
 def add_expense():
     data = request.get_json()
+    conn = get_conn()
+    cur = conn.cursor()
 
-    title = data.get("title")
-    category = data.get("category")
-    amount = float(data.get("amount", 0))
+    cur.execute(
+        "INSERT INTO expenses (title, category, amount) VALUES (%s, %s, %s) RETURNING id;",
+        (data["title"], data["category"], data["amount"])
+    )
 
-    expense = {
-        "id": len(expenses) + 1,
-        "title": title,
-        "category": category,
-        "amount": amount
-    }
+    new_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
 
-    expenses.append(expense)
-
-    return jsonify({"message": "Expense added", "data": expense})
-
+    return jsonify({"message": "Expense added", "id": new_id})
 
 @app.route("/expenses", methods=["GET"])
 def get_expenses():
-    return jsonify(expenses)
+    conn = get_conn()
+    cur = conn.cursor()
 
+    cur.execute("SELECT id, title, category, amount FROM expenses ORDER BY id DESC;")
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    data = [
+        {"id": r[0], "title": r[1], "category": r[2], "amount": r[3]}
+        for r in rows
+    ]
+
+    return jsonify(data)
 
 @app.route("/summary", methods=["GET"])
 def summary():
-    total_purchase = sum(e["amount"] for e in expenses)
-    total_payment = 0  # extend later if needed
-    net = total_purchase - total_payment
-    closing_balance = net
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COALESCE(SUM(amount),0) FROM expenses;")
+    total_purchase = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
 
     return jsonify({
         "total_purchase": total_purchase,
-        "total_payment": total_payment,
-        "net": net,
-        "closing_balance": closing_balance
+        "total_payment": 0,
+        "net": total_purchase,
+        "closing_balance": total_purchase
     })
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
