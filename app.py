@@ -71,19 +71,55 @@ def get_expenses():
     return jsonify(data)
 
 @app.route("/summary", methods=["GET"])
-def summary():
+def get_summary():
     conn = get_conn()
     cur = conn.cursor()
 
-    cur.execute("SELECT COALESCE(SUM(amount),0) FROM expenses;")
-    total_purchase = cur.fetchone()[0]
+    cur.execute("SELECT COALESCE(SUM(amount),0) FROM expenses")
+    total_expense = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM expenses")
+    total_entries = cur.fetchone()[0]
 
     cur.close()
     conn.close()
 
     return jsonify({
-        "total_purchase": total_purchase,
-        "total_payment": 0,
-        "net": total_purchase,
-        "closing_balance": total_purchase
+        "total_expense": float(total_expense),
+        "total_entries": total_entries
     })
+
+@app.route("/expenses", methods=["GET"])
+def get_expenses():
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, title, category, amount FROM expenses ORDER BY id DESC")
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    data = []
+    for row in rows:
+        data.append({
+            "id": row[0],
+            "title": row[1],
+            "category": row[2],
+            "amount": float(row[3])
+        })
+
+    return jsonify(data)   
+
+@app.route("/delete-expense/<int:id>", methods=["DELETE"])
+def delete_expense(id):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM expenses WHERE id=%s", (id,))
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "Deleted successfully"})
